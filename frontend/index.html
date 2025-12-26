@@ -516,9 +516,9 @@
                 ${pred.prediction_type === 'batch' ? ' Batch' : ' Single'}
               </span>
             </td>
-            <td class="px-4 py-3">$${pred.annual_income.toLocaleString()}</td>
+            <td class="px-4 py-3">${pred.annual_income.toLocaleString()}</td>
             <td class="px-4 py-3">${pred.credit_score}</td>
-            <td class="px-4 py-3">$${pred.loan_amount.toLocaleString()}</td>
+            <td class="px-4 py-3">${pred.loan_amount.toLocaleString()}</td>
             <td class="px-4 py-3">
               <span class="font-semibold ${pred.prediction === 1 ? 'text-green-300' : 'text-red-300'}">
                 ${pred.prediction === 1 ? ' Approve' : ' Reject'}
