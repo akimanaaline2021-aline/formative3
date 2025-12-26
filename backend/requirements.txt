@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+python-multipart
+passlib[bcrypt]
+PyJWT
+email-validator
+pandas
+joblib
+scikit-learn

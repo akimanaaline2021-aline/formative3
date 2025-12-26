@@ -1,0 +1,16 @@
+[
+  {
+    "id": 1,
+    "username": "akimanaaline",
+    "email": "akimanaaline2021@gmail.com",
+    "hashed_password": "$2b$12$t/3WL9AGgVKssgfRm0k.n.qK/O8PdfGTicc7Fffpk0waJ64Rmtq.m",
+    "created_at": "2025-12-22T23:32:42.734836"
+  },
+  {
+    "id": 2,
+    "username": "Eric",
+    "email": "ericuwinezastarboy@gmail.com",
+    "hashed_password": "$2b$12$5p0VaaSOioiin5oYxgQasOsDfOMGne2RZhLdHSspmdZZRdP3fakDm",
+    "created_at": "2025-12-22T23:35:05.015402"
+  }
+]

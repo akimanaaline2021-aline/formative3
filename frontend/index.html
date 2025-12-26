@@ -1,0 +1,664 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Loan Payback Prediction</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+
+    select option {
+    background-color: #1f2937; /* dark */
+    color: white;
+  }
+
+  /* Selected option inside dropdown */
+  select option:checked {
+    background-color: #6366f1; /* indigo */
+    color: white;
+  }
+
+
+    .glass {
+      background: rgba(255, 255, 255, 0.1);
+      backdrop-filter: blur(10px);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+    }
+    body {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+    }
+  </style>
+</head>
+<body class="font-sans">
+  <div id="app"></div>
+
+  <script>
+    const API_URL = "http://127.0.0.1:8080";
+    let token = localStorage.getItem("token");
+    let currentTab = "predictions";
+
+    // Router
+    function navigate(page) {
+      if (page === "dashboard" && !token) {
+        page = "login";
+      }
+      render(page);
+    }
+
+    // Auth check
+    function checkAuth() {
+      if (!token) {
+        navigate("login");
+        return false;
+      }
+      return true;
+    }
+
+    // API calls
+    async function apiCall(endpoint, method = "GET", body = null, isFormData = false) {
+      const headers = {};
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+      if (body && !isFormData) headers["Content-Type"] = "application/json";
+
+      const options = { method, headers };
+      if (body) options.body = isFormData ? body : JSON.stringify(body);
+
+      try {
+        const res = await fetch(`${API_URL}${endpoint}`, options);
+        
+        if (res.status === 401) {
+          localStorage.removeItem("token");
+          token = null;
+          navigate("login");
+          throw new Error("Unauthorized - Please login again");
+        }
+        
+        if (!res.ok) {
+          let errorMsg = `Request failed with status ${res.status}`;
+          try {
+            const errorData = await res.json();
+            errorMsg = errorData.detail || errorMsg;
+          } catch (e) {
+            // Could not parse error as JSON
+          }
+          throw new Error(errorMsg);
+        }
+        
+        return await res.json();
+      } catch (err) {
+        if (err.name === "TypeError" && err.message === "Failed to fetch") {
+          throw new Error("Cannot connect to server. Make sure backend is running at http://127.0.0.1:8080");
+        }
+        throw err;
+      }
+    }
+
+    // Login Page
+    function renderLogin() {
+      return `
+        <div class="min-h-screen flex items-center justify-center p-4">
+          <div class="glass rounded-3xl p-8 w-full max-w-md shadow-2xl">
+            <h1 class="text-4xl font-bold text-white text-center mb-8">Loan Predictor</h1>
+            
+            <div class="mb-6">
+              <div class="flex gap-2 bg-white/10 rounded-lg p-1">
+                <button onclick="toggleAuthMode('login')" id="loginTab" class="flex-1 py-2 rounded-md text-white bg-white/20 font-medium transition">Login</button>
+                <button onclick="toggleAuthMode('register')" id="registerTab" class="flex-1 py-2 rounded-md text-white/70 font-medium transition">Register</button>
+              </div>
+            </div>
+
+            <form id="authForm" class="space-y-4">
+              <div id="emailField" style="display:none;">
+                <input type="email" id="email" placeholder="Email" class="w-full px-4 py-3 rounded-lg bg-white/20 text-white placeholder-white/60 border border-white/30 focus:outline-none focus:ring-2 focus:ring-white/50">
+              </div>
+              <div>
+                <input type="text" id="username" placeholder="Username" required class="w-full px-4 py-3 rounded-lg bg-white/20 text-white placeholder-white/60 border border-white/30 focus:outline-none focus:ring-2 focus:ring-white/50">
+              </div>
+              <div>
+                <input type="password" id="password" placeholder="Password" required maxlength="72" class="w-full px-4 py-3 rounded-lg bg-white/20 text-white placeholder-white/60 border border-white/30 focus:outline-none focus:ring-2 focus:ring-white/50">
+              </div>
+              <button type="submit" class="w-full bg-white text-purple-600 py-3 rounded-lg font-semibold hover:bg-gray-100 transition">
+                <span id="authButtonText">Login</span>
+              </button>
+            </form>
+            <div id="authError" class="mt-4 text-red-300 text-sm text-center"></div>
+          </div>
+        </div>
+      `;
+    }
+
+    // Dashboard Page
+    function renderDashboard() {
+      return `
+        <div class="min-h-screen p-6">
+          <div class="max-w-7xl mx-auto">
+            <div class="flex justify-between items-center mb-8">
+              <h1 class="text-4xl font-bold text-white">Loan Prediction Dashboard</h1>
+              <button onclick="logout()" class="bg-white/20 text-white px-6 py-2 rounded-lg hover:bg-white/30 transition">Logout</button>
+            </div>
+
+            <!-- Tab Navigation -->
+            <div class="mb-6">
+              <div class="flex gap-2 bg-white/10 rounded-lg p-1 glass">
+                <button onclick="switchTab('predictions')" id="predictionsTab" class="flex-1 py-3 rounded-md text-white bg-white/20 font-medium transition">Make Predictions</button>
+                <button onclick="switchTab('history')" id="historyTab" class="flex-1 py-3 rounded-md text-white/70 font-medium transition">View All Predictions</button>
+              </div>
+            </div>
+
+            <!-- Predictions Tab -->
+            <div id="predictionsContent" class="grid md:grid-cols-2 gap-6">
+              <!-- Single Prediction -->
+              <div class="glass rounded-2xl p-6">
+                <h2 class="text-2xl font-bold text-white mb-6">Single Prediction</h2>
+                <form id="singleForm" class="space-y-4">
+                  <div class="grid grid-cols-2 gap-4">
+                    <input type="text" name="name" placeholder="Full Name" required class="col-span-2 px-4 py-2 rounded-lg bg-white/20 text-white placeholder-white/60 border border-white/30 focus:outline-none focus:ring-2 focus:ring-white/50">
+                    
+                    <input type="number" name="annual_income" placeholder="Annual Income" required class="px-4 py-2 rounded-lg bg-white/20 text-white placeholder-white/60 border border-white/30 focus:outline-none focus:ring-2 focus:ring-white/50">
+                    
+                    <input type="number" step="0.01" name="debt_to_income_ratio" placeholder="Debt to Income Ratio" required class="px-4 py-2 rounded-lg bg-white/20 text-white placeholder-white/60 border border-white/30 focus:outline-none focus:ring-2 focus:ring-white/50">
+                    
+                    <input type="number" name="credit_score" placeholder="Credit Score" required class="px-4 py-2 rounded-lg bg-white/20 text-white placeholder-white/60 border border-white/30 focus:outline-none focus:ring-2 focus:ring-white/50">
+                    
+                    <input type="number" name="loan_amount" placeholder="Loan Amount" required class="px-4 py-2 rounded-lg bg-white/20 text-white placeholder-white/60 border border-white/30 focus:outline-none focus:ring-2 focus:ring-white/50">
+                    
+                    <input type="number" step="0.01" name="interest_rate" placeholder="Interest Rate (%)" required class="px-4 py-2 rounded-lg bg-white/20 text-white placeholder-white/60 border border-white/30 focus:outline-none focus:ring-2 focus:ring-white/50">
+                    
+                    <select name="gender" required class="px-4 py-2 rounded-lg bg-white/20 text-white border border-white/30 focus:outline-none focus:ring-2 focus:ring-white/50">
+                      <option value="" disabled selected>Select Gender</option>
+                      <option value="Male">Male</option>
+                      <option value="Female">Female</option>
+                      <option value="Other">Other</option>
+                    </select>
+                    
+                    <select name="marital_status" required class="px-4 py-2 rounded-lg bg-white/20 text-white border border-white/30 focus:outline-none focus:ring-2 focus:ring-white/50">
+                      <option value="" disabled selected>Select Marital Status</option>
+                      <option value="Single">Single</option>
+                      <option value="Married">Married</option>
+                      <option value="Divorced">Divorced</option>
+                      <option value="Widowed">Widowed</option>
+                    </select>
+                    
+                    <select name="education_level" required class="px-4 py-2 rounded-lg bg-white/20 text-white border border-white/30 focus:outline-none focus:ring-2 focus:ring-white/50">
+                      <option value="" disabled selected>Select Education Level</option>
+                      <option value="High School">High School</option>
+                      <option value="Associate">Associate</option>
+                      <option value="Bachelor">Bachelor</option>
+                      <option value="Master">Master</option>
+                      <option value="Doctorate">Doctorate</option>
+                    </select>
+                    
+                    <select name="employment_status" required class="px-4 py-2 rounded-lg bg-white/20 text-white border border-white/30 focus:outline-none focus:ring-2 focus:ring-white/50">
+                      <option value="" disabled selected>Select Employment Status</option>
+                      <option value="Employed">Employed</option>
+                      <option value="Self-Employed">Self-Employed</option>
+                      <option value="Unemployed">Unemployed</option>
+                      <option value="Retired">Retired</option>
+                    </select>
+                    
+                    <select name="loan_purpose" required class="px-4 py-2 rounded-lg bg-white/20 text-white border border-white/30 focus:outline-none focus:ring-2 focus:ring-white/50">
+                      <option value="" disabled selected>Select Loan Purpose</option>
+                      <option value="Home">Home</option>
+                      <option value="Car">Car</option>
+                      <option value="Education">Education</option>
+                      <option value="Business">Business</option>
+                      <option value="Debt Consolidation">Debt Consolidation</option>
+                      <option value="Medical">Medical</option>
+                      <option value="Other">Other</option>
+                    </select>
+                    
+                    <select name="grade_subgrade" required class="col-span-2 px-4 py-2 rounded-lg bg-white/20 text-white border border-white/30 focus:outline-none focus:ring-2 focus:ring-white/50">
+                      <option value="" disabled selected>Select Grade Subgrade</option>
+                      <option value="A1">A1 (Excellent)</option>
+                      <option value="A2">A2 (Excellent)</option>
+                      <option value="A3">A3 (Excellent)</option>
+                      <option value="B1">B1 (Very Good)</option>
+                      <option value="B2">B2 (Very Good)</option>
+                      <option value="B3">B3 (Very Good)</option>
+                      <option value="C1">C1 (Good)</option>
+                      <option value="C2">C2 (Good)</option>
+                      <option value="C3">C3 (Good)</option>
+                      <option value="D1">D1 (Fair)</option>
+                      <option value="D2">D2 (Fair)</option>
+                      <option value="D3">D3 (Fair)</option>
+                      <option value="E1">E1 (Poor)</option>
+                      <option value="E2">E2 (Poor)</option>
+                    </select>
+                  </div>
+                  <button type="submit" class="w-full bg-white text-purple-600 py-3 rounded-lg font-semibold hover:bg-gray-100 transition">Predict</button>
+                </form>
+                <div id="singleResult" class="mt-4"></div>
+              </div>
+
+              <!-- Batch Prediction -->
+              <div class="glass rounded-2xl p-6">
+                <h2 class="text-2xl font-bold text-white mb-6">Batch Prediction</h2>
+                
+                <button onclick="downloadTemplate()" class="w-full bg-blue-500 text-white py-3 rounded-lg font-semibold hover:bg-blue-600 transition mb-4">
+                   Download CSV Template (5 Sample Rows)
+                </button>
+                
+                <form id="batchForm" class="space-y-4">
+                  <div class="border-2 border-dashed border-white/30 rounded-lg p-8 text-center">
+                    <input type="file" id="batchFile" accept=".csv" class="hidden" required>
+                    <label for="batchFile" class="cursor-pointer">
+                      <div class="text-white/60 mb-2">
+                        <svg class="w-12 h-12 mx-auto mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                        </svg>
+                      </div>
+                      <span class="text-white font-medium">Click to upload CSV</span>
+                      <p class="text-white/60 text-sm mt-1" id="fileName">or drag and drop</p>
+                    </label>
+                  </div>
+                  <button type="submit" class="w-full bg-white text-purple-600 py-3 rounded-lg font-semibold hover:bg-gray-100 transition">📤 Upload & Predict Batch</button>
+                </form>
+                <div id="batchResult" class="mt-4"></div>
+              </div>
+            </div>
+
+            <!-- History Tab -->
+            <div id="historyContent" style="display:none;">
+              <div class="glass rounded-2xl p-6">
+                <div class="flex justify-between items-center mb-6">
+                  <h2 class="text-2xl font-bold text-white">All Predictions History</h2>
+                  <button onclick="downloadHistory()" class="bg-green-500 text-white px-6 py-3 rounded-lg hover:bg-green-600 transition flex items-center gap-2">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                    </svg>
+                    Export to CSV
+                  </button>
+                </div>
+                <div class="mb-4 text-white/80 text-sm">
+                   Click "Export to CSV" to download all predictions for Excel or backup
+                </div>
+                <div class="overflow-x-auto">
+                  <table class="w-full text-white" id="historyTable">
+                    <thead class="bg-white/10">
+                      <tr>
+                        <th class="px-4 py-3 text-left">ID</th>
+                        <th class="px-4 py-3 text-left">Name</th>
+                        <th class="px-4 py-3 text-left">Date</th>
+                        <th class="px-4 py-3 text-left">Type</th>
+                        <th class="px-4 py-3 text-left">Annual Income</th>
+                        <th class="px-4 py-3 text-left">Credit Score</th>
+                        <th class="px-4 py-3 text-left">Loan Amount</th>
+                        <th class="px-4 py-3 text-left">Prediction</th>
+                        <th class="px-4 py-3 text-left">Probability</th>
+                      </tr>
+                    </thead>
+                    <tbody id="historyList" class="divide-y divide-white/10">
+                      <tr>
+                        <td colspan="9" class="text-center py-8 text-white/60">Loading...</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    // Switch between tabs
+    window.switchTab = function(tab) {
+      currentTab = tab;
+      const predictionsTab = document.getElementById("predictionsTab");
+      const historyTab = document.getElementById("historyTab");
+      const predictionsContent = document.getElementById("predictionsContent");
+      const historyContent = document.getElementById("historyContent");
+
+      if (tab === "predictions") {
+        predictionsTab.classList.add("bg-white/20");
+        predictionsTab.classList.remove("text-white/70");
+        historyTab.classList.remove("bg-white/20");
+        historyTab.classList.add("text-white/70");
+        predictionsContent.style.display = "grid";
+        historyContent.style.display = "none";
+      } else {
+        historyTab.classList.add("bg-white/20");
+        historyTab.classList.remove("text-white/70");
+        predictionsTab.classList.remove("bg-white/20");
+        predictionsTab.classList.add("text-white/70");
+        predictionsContent.style.display = "none";
+        historyContent.style.display = "block";
+        loadHistory(); // Load history when switching to history tab
+      }
+    };
+
+    // Render
+    function render(page) {
+      const app = document.getElementById("app");
+      if (page === "login") {
+        app.innerHTML = renderLogin();
+        setupAuthListeners();
+      } else if (page === "dashboard") {
+        if (!checkAuth()) return;
+        app.innerHTML = renderDashboard();
+        setupDashboardListeners();
+      }
+    }
+
+    // Auth listeners
+    function setupAuthListeners() {
+      let mode = "login";
+      
+      window.toggleAuthMode = function(newMode) {
+        mode = newMode;
+        const loginTab = document.getElementById("loginTab");
+        const registerTab = document.getElementById("registerTab");
+        const emailField = document.getElementById("emailField");
+        const authButtonText = document.getElementById("authButtonText");
+        
+        if (mode === "login") {
+          loginTab.classList.add("bg-white/20");
+          loginTab.classList.remove("text-white/70");
+          registerTab.classList.remove("bg-white/20");
+          registerTab.classList.add("text-white/70");
+          emailField.style.display = "none";
+          document.getElementById("email").removeAttribute("required");
+          authButtonText.textContent = "Login";
+        } else {
+          registerTab.classList.add("bg-white/20");
+          registerTab.classList.remove("text-white/70");
+          loginTab.classList.remove("bg-white/20");
+          loginTab.classList.add("text-white/70");
+          emailField.style.display = "block";
+          document.getElementById("email").setAttribute("required", "required");
+          authButtonText.textContent = "Register";
+        }
+      };
+
+      document.getElementById("authForm").addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const username = document.getElementById("username").value;
+        const password = document.getElementById("password").value;
+        const email = document.getElementById("email")?.value;
+        const errorDiv = document.getElementById("authError");
+        const submitBtn = e.target.querySelector('button[type="submit"]');
+        
+        submitBtn.disabled = true;
+        submitBtn.innerHTML = '<span class="opacity-50">Processing...</span>';
+        errorDiv.textContent = "";
+
+        try {
+          const endpoint = mode === "login" ? "/login" : "/register";
+          const body = mode === "login" ? { username, password } : { username, password, email };
+          const data = await apiCall(endpoint, "POST", body);
+          
+          token = data.access_token;
+          localStorage.setItem("token", token);
+          
+          // Show success message before redirect
+          errorDiv.className = "mt-4 text-green-300 text-sm text-center";
+          errorDiv.textContent = mode === "login" ? "Login successful!" : "Registration successful!";
+          
+          // Redirect to dashboard after short delay
+          setTimeout(() => {
+            navigate("dashboard");
+          }, 500);
+        } catch (err) {
+          errorDiv.className = "mt-4 text-red-300 text-sm text-center";
+          errorDiv.textContent = err.message || "Authentication failed";
+          submitBtn.disabled = false;
+          submitBtn.innerHTML = `<span id="authButtonText">${mode === "login" ? "Login" : "Register"}</span>`;
+        }
+      });
+    }
+
+    // Dashboard listeners
+    function setupDashboardListeners() {
+      // File input change listener to show file name
+      document.getElementById("batchFile").addEventListener("change", (e) => {
+        const fileName = e.target.files[0]?.name || "or drag and drop";
+        document.getElementById("fileName").textContent = fileName;
+      });
+
+      document.getElementById("singleForm").addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const formData = new FormData(e.target);
+        const obj = Object.fromEntries(formData.entries());
+        
+        // Keep name as string, convert others to numbers
+        obj.annual_income = parseFloat(obj.annual_income);
+        obj.debt_to_income_ratio = parseFloat(obj.debt_to_income_ratio);
+        obj.credit_score = parseFloat(obj.credit_score);
+        obj.loan_amount = parseFloat(obj.loan_amount);
+        obj.interest_rate = parseFloat(obj.interest_rate);
+
+        try {
+          const data = await apiCall("/predict_single", "POST", obj);
+          
+          // Calculate approve and reject probabilities
+          const approveProb = (data.probability * 100).toFixed(2);
+          const rejectProb = ((1 - data.probability) * 100).toFixed(2);
+          
+          document.getElementById("singleResult").innerHTML = `
+            <div class="bg-white/20 rounded-lg p-4 text-white">
+              <p class="font-semibold text-lg mb-3">Prediction Result:</p>
+              <div class="space-y-2">
+                <div class="flex justify-between items-center">
+                  <span class="font-medium">Will Payback (Approve):</span>
+                  <span class="text-green-300 font-bold">${approveProb}%</span>
+                </div>
+                <div class="flex justify-between items-center">
+                  <span class="font-medium">Will Not Payback (Reject):</span>
+                  <span class="text-red-300 font-bold">${rejectProb}%</span>
+                </div>
+                <div class="mt-3 pt-3 border-t border-white/20">
+                  <p class="text-center font-semibold text-lg">
+                    ${data.prediction === 1 ? ' APPROVED' : ' REJECTED'}
+                  </p>
+                </div>
+                <p class="text-xs mt-2 text-white/60 text-center">Saved to history (ID: ${data.id})</p>
+              </div>
+            </div>
+          `;
+          e.target.reset();
+        } catch (err) {
+          alert("Prediction failed: " + err.message);
+        }
+      });
+
+      document.getElementById("batchForm").addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const fileInput = document.getElementById("batchFile");
+        
+        if (!fileInput.files[0]) {
+          alert("Please select a CSV file");
+          return;
+        }
+        
+        const formData = new FormData();
+        formData.append("file", fileInput.files[0]);
+
+        try {
+          const data = await apiCall("/predict_batch", "POST", formData, true);
+          document.getElementById("batchResult").innerHTML = `
+            <div class="bg-white/20 rounded-lg p-4 text-white">
+              <p class="font-semibold"> Batch processed: ${data.count} predictions</p>
+              <p class="text-sm">Batch ID: ${data.batch_id}</p>
+              <p class="text-xs mt-2 text-white/60">All predictions saved to history</p>
+              <button onclick="switchTab('history')" class="mt-3 w-full bg-blue-500 text-white py-2 rounded-lg hover:bg-blue-600 transition">View All Predictions</button>
+            </div>
+          `;
+          e.target.reset();
+          document.getElementById("fileName").textContent = "or drag and drop";
+        } catch (err) {
+          alert("Batch prediction failed: " + err.message);
+        }
+      });
+    }
+
+    // Load history
+    async function loadHistory() {
+      const historyList = document.getElementById("historyList");
+      
+      try {
+        console.log("Loading history...");
+        const data = await apiCall("/predictions/history");
+        console.log("History data received:", data);
+        
+        if (data.length === 0) {
+          historyList.innerHTML = '<tr><td colspan="9" class="text-center py-8 text-white/60">No predictions yet</td></tr>';
+          return;
+        }
+
+        historyList.innerHTML = data.map(pred => `
+          <tr class="hover:bg-white/5 transition">
+            <td class="px-4 py-3">${pred.id}</td>
+            <td class="px-4 py-3 font-semibold">${pred.name || 'Unknown'}</td>
+            <td class="px-4 py-3 text-sm">${new Date(pred.created_at).toLocaleString()}</td>
+            <td class="px-4 py-3">
+              <span class="px-2 py-1 rounded text-xs ${pred.prediction_type === 'batch' ? 'bg-blue-500' : 'bg-purple-500'}">
+                ${pred.prediction_type === 'batch' ? ' Batch' : ' Single'}
+              </span>
+            </td>
+            <td class="px-4 py-3">$${pred.annual_income.toLocaleString()}</td>
+            <td class="px-4 py-3">${pred.credit_score}</td>
+            <td class="px-4 py-3">$${pred.loan_amount.toLocaleString()}</td>
+            <td class="px-4 py-3">
+              <span class="font-semibold ${pred.prediction === 1 ? 'text-green-300' : 'text-red-300'}">
+                ${pred.prediction === 1 ? ' Approve' : ' Reject'}
+              </span>
+            </td>
+            <td class="px-4 py-3">${(pred.probability * 100).toFixed(1)}%</td>
+          </tr>
+        `).join('');
+      } catch (err) {
+        console.error("Failed to load history:", err);
+        console.error("Error details:", err.message);
+        
+        let errorMsg = "Failed to load history";
+        if (err.message.includes("Cannot connect")) {
+          errorMsg = "Cannot connect to backend. Is it running on port 8080?";
+        } else if (err.message.includes("Unauthorized")) {
+          errorMsg = "Session expired. Please logout and login again.";
+        } else {
+          errorMsg = `Failed to load history: ${err.message}`;
+        }
+        
+        historyList.innerHTML = `<tr><td colspan="9" class="text-center py-8 text-red-300">${errorMsg}</td></tr>`;
+      }
+    }
+
+    // Download CSV template with 5 sample rows
+    window.downloadTemplate = function() {
+      const headers = ["name", "annual_income", "debt_to_income_ratio", "credit_score", "loan_amount", "interest_rate", "gender", "marital_status", "education_level", "employment_status", "loan_purpose", "grade_subgrade"];
+      
+      // 5 sample rows with realistic data
+      const sampleData = [
+        ["John Smith", 75000, 0.35, 720, 25000, 5.5, "Male", "Married", "Bachelor", "Employed", "Home", "A1"],
+        ["Sarah Johnson", 55000, 0.45, 680, 15000, 6.2, "Female", "Single", "Master", "Employed", "Car", "B2"],
+        ["Michael Brown", 90000, 0.25, 760, 35000, 4.8, "Male", "Married", "Bachelor", "Employed", "Business", "A2"],
+        ["Emily Davis", 45000, 0.52, 620, 12000, 7.5, "Female", "Divorced", "High School", "Self-Employed", "Debt Consolidation", "C1"],
+        ["David Wilson", 65000, 0.38, 700, 20000, 5.9, "Male", "Single", "Bachelor", "Employed", "Education", "B1"]
+      ];
+
+      const csvContent = [
+        headers.join(","),
+        ...sampleData.map(row => row.join(","))
+      ].join("\n");
+
+      const blob = new Blob([csvContent], { type: "text/csv" });
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "loan_prediction_template.csv";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.URL.revokeObjectURL(url);
+    };
+
+    // Download history as CSV
+    window.downloadHistory = async function() {
+      try {
+        const data = await apiCall("/predictions/history");
+        
+        if (data.length === 0) {
+          alert("No predictions to download");
+          return;
+        }
+
+        // Create CSV content
+        const headers = ["ID", "Name", "Date", "Type", "Annual Income", "Debt to Income", "Credit Score", "Loan Amount", "Interest Rate", "Gender", "Marital Status", "Education", "Employment", "Loan Purpose", "Grade", "Prediction", "Probability"];
+        const rows = data.map(pred => [
+          pred.id,
+          pred.name || "Unknown",
+          new Date(pred.created_at).toISOString(),
+          pred.prediction_type,
+          pred.annual_income,
+          pred.debt_to_income_ratio,
+          pred.credit_score,
+          pred.loan_amount,
+          pred.interest_rate,
+          pred.gender,
+          pred.marital_status,
+          pred.education_level,
+          pred.employment_status,
+          pred.loan_purpose,
+          pred.grade_subgrade,
+          pred.prediction === 1 ? "Approve" : "Reject",
+          pred.probability
+        ]);
+
+        const csvContent = [
+          headers.join(","),
+          ...rows.map(row => row.join(","))
+        ].join("\n");
+
+        // Download file
+        const blob = new Blob([csvContent], { type: "text/csv" });
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `predictions_${new Date().toISOString().split('T')[0]}.csv`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        window.URL.revokeObjectURL(url);
+      } catch (err) {
+        alert("Failed to download history: " + err.message);
+      }
+    };
+
+    // Logout
+    window.logout = function() {
+      localStorage.removeItem("token");
+      token = null;
+      navigate("login");
+    };
+    // Initialize
+if (token) {
+  navigate("dashboard");
+} else {
+  navigate("login");
+}
+async function validateToken() {
+  if (!token) return false;
+  try {
+    await apiCall("/auth/me"); // or any endpoint that checks auth
+    return true;
+  } catch {
+    localStorage.removeItem("token");
+    token = null;
+    return false;
+  }
+}
+
+(async () => {
+  if (await validateToken()) {
+    navigate("dashboard");
+  } else {
+    navigate("login");
+  }
+})();
+
+
+   
+  </script>
+</body>
+</html>
